@@ -8,9 +8,6 @@ import random
 from enum import Enum
 import csv
 
-# New One:
-# RMSProp, 750000 mem, test eps 0.05: Started at 2
-
 # CONSTANTS ---
 env = gym.make('BreakoutDeterministic-v0')
 test_env = gym.make('BreakoutDeterministic-v4')
