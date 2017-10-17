@@ -15,7 +15,6 @@ STATE_SHAPE = env.observation_space.shape
 ACTION_SIZE = env.action_space.n
 
 NUM_TRAIN_STEPS = 50000000
-NUM_TEST_STEPS = 500000
 TEST_VISUALIZE = False
 TEST_FREQ = 50
 TEST_EP_NUM = 5
