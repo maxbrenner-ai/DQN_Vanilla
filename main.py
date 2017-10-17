@@ -8,9 +8,6 @@ import random
 from enum import Enum
 import csv
 
-# New One:
-# RMSProp, 750000 mem, test eps 0.05: Started at 2
-
 # CONSTANTS ---
 env = gym.make('BreakoutDeterministic-v0')
 test_env = gym.make('BreakoutDeterministic-v4')
@@ -18,7 +15,6 @@ STATE_SHAPE = env.observation_space.shape
 ACTION_SIZE = env.action_space.n
 
 NUM_TRAIN_STEPS = 50000000
-NUM_TEST_STEPS = 500000
 TEST_VISUALIZE = False
 TEST_FREQ = 50
 TEST_EP_NUM = 5
