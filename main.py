@@ -105,10 +105,6 @@ class DQN:
         # Compiling -------------------
         self.beh_model = self.create_model()
         self.tar_model = self.create_model()
-        if OPTIMIZER is "RMSProp":
-            self.optimizer = tf.train.RMSPropOptimizer(LEARNING_RATE, momentum=0.0, epsilon=0.01, decay=0.95, centered=True)  # The paper's optimizer
-        else:
-            self.optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
 
         self.sess = tf.Session()
         K.set_session(self.sess)
@@ -160,7 +156,13 @@ class DQN:
 
         loss = tf.reduce_mean(loss)
 
+        if OPTIMIZER is "RMSProp":
+            self.optimizer = tf.train.RMSPropOptimizer(LEARNING_RATE, momentum=0.0, epsilon=0.01, decay=0.95, centered=True)  # The paper's optimizer
+        else:
+            self.optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
+
         self.minimize = self.optimizer.minimize(loss)
+
 
     def create_tar_graph(self):
         states = self.states / 255.0
