@@ -1,4 +1,3 @@
-from keras import models
 from keras.models import Model, Sequential
 from keras.layers import *
 import numpy as np
@@ -38,7 +37,7 @@ GAMMA = 0.99
 TAR_UPDATE_WAIT = 10000
 LEARNING_RATE = 0.00025
 HUBER_LOSS = True
-OPTIMIZER = "Adam"  # Can also be "RMPSProp"
+OPTIMIZER = "Graves_RMPSProp"  # Can also be "RMPSProp" or "Adam"
 # -------------
 
 class RunType(Enum):
@@ -84,8 +83,12 @@ class StateProcessor:
         if done:
             return_state = np.zeros(shape=SCREEN_DIMS, dtype=np.uint8)
         else:
-            return_state = sess.run(self.proc_state, {self.input_state: next_state})
+            if next_state.shape != SCREEN_DIMS:
+                return_state = sess.run(self.proc_state, {self.input_state: next_state})
+            else:
+                return_state = next_state
         if current_state is None:
+            assert not done
             return_state = [return_state, return_state, return_state, return_state]
         else:
             return_state = [current_state[1], current_state[2], current_state[3], return_state]
@@ -134,31 +137,63 @@ class DQN:
         self.beh_output = self.beh_model(states)
         outputs_vec = tf.reduce_sum(tf.multiply(tf.one_hot(self.actions, ACTION_SIZE), self.beh_output), axis=1)
 
-        # if HUBER_LOSS:
-        #     td_errors = tf.abs(errors)
-        #     quadratic_part = tf.minimum(td_errors, 1.0)
-        #     first = 0.5 * tf.square(quadratic_part)
-        #     second = 1.0 * tf.subtract(td_errors, quadratic_part)
-        #     loss = tf.add(first, second)
-        # else:
-        #     # MSE
-        #     loss = tf.square(errors)
-
         if HUBER_LOSS:
             loss = tf.losses.huber_loss(self.targets, outputs_vec)
         else:
             errors = tf.subtract(self.targets, outputs_vec)
             loss = tf.square(errors)
-
-        loss = tf.reduce_mean(loss)
+            loss = tf.reduce_mean(loss)
 
         if OPTIMIZER is "RMSProp":
-            self.optimizer = tf.train.RMSPropOptimizer(LEARNING_RATE, momentum=0.0, epsilon=0.01, decay=0.95, centered=True)  # The paper's optimizer
-        else:
-            self.optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
+            self.minimize = tf.train.RMSPropOptimizer(LEARNING_RATE, momentum=0.0, epsilon=0.01, decay=0.95, centered=True).minimize(loss)
+        elif OPTIMIZER is "Graves_RMPSProp":
+            self.minimize = self.graves_rmsprop_optimizer(loss, LEARNING_RATE, 0.95, 0.01, 0.0)
+        else:  # Adam
+            self.minimize = tf.train.AdamOptimizer(LEARNING_RATE).minimize(loss)
 
-        self.minimize = self.optimizer.minimize(loss)
 
+    def graves_rmsprop_optimizer(self, loss, learning_rate, rmsprop_decay, rmsprop_constant, gradient_clip):
+        with tf.name_scope('rmsprop'):
+            optimizer = None
+            optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+
+            grads_and_vars = optimizer.compute_gradients(loss)
+
+            grads = []
+            params = []
+            for p in grads_and_vars:
+                if p[0] == None:
+                    continue
+                grads.append(p[0])
+                params.append(p[1])
+            # grads = [gv[0] for gv in grads_and_vars]
+            # params = [gv[1] for gv in grads_and_vars]
+            if gradient_clip > 0:
+                grads = tf.clip_by_global_norm(grads, gradient_clip)[0]
+
+            square_grads = [tf.square(grad) for grad in grads]
+
+            avg_grads = [tf.Variable(tf.zeros(var.get_shape()))
+                         for var in params]
+            avg_square_grads = [tf.Variable(
+                tf.zeros(var.get_shape())) for var in params]
+
+            update_avg_grads = [
+                grad_pair[0].assign((rmsprop_decay * grad_pair[0]) + tf.scalar_mul((1 - rmsprop_decay), grad_pair[1]))
+                for grad_pair in zip(avg_grads, grads)]
+            update_avg_square_grads = [
+                grad_pair[0].assign((rmsprop_decay * grad_pair[0]) + ((1 - rmsprop_decay) * tf.square(grad_pair[1])))
+                for grad_pair in zip(avg_square_grads, grads)]
+            avg_grad_updates = update_avg_grads + update_avg_square_grads
+
+            rms = [tf.sqrt(avg_grad_pair[1] - tf.square(avg_grad_pair[0]) + rmsprop_constant)
+                   for avg_grad_pair in zip(avg_grads, avg_square_grads)]
+
+            rms_updates = [grad_rms_pair[0] / grad_rms_pair[1]
+                           for grad_rms_pair in zip(grads, rms)]
+            train = optimizer.apply_gradients(zip(rms_updates, params))
+
+            return tf.group(train, tf.group(*avg_grad_updates))
 
     def create_tar_graph(self):
         states = self.states / 255.0
@@ -169,8 +204,6 @@ class DQN:
     def update_implicit_policy(self, step):
         if step <= FINAL_EXP_FRAME:
             self.eps = FINAL_EPS + (INIT_EPS - FINAL_EPS) * np.maximum(0, (FINAL_EXP_FRAME - step)) / FINAL_EXP_FRAME
-        # else:
-        #     self.eps = FINAL_EPS_TWO + (FINAL_EPS - FINAL_EPS_TWO) * np.maximum(0, (FINAL_EXP_FRAME_TWO - step)) / FINAL_EXP_FRAME_TWO
 
     def act(self, state, run_type):
         if run_type is RunType.RAND_FILL:
@@ -274,7 +307,7 @@ class Runner:
 
         current_total_step = 0
         current_episode = 1  # MUST START AT 1
-        current_ep_step, state, noop = self.reset_episode()
+        current_ep_step, state, noop = self.reset_episode(None)
         total_ep_reward = 0
 
         if self.run_type is not RunType.RAND_FILL:
@@ -290,10 +323,21 @@ class Runner:
             if self.run_type is RunType.TEST and TEST_VISUALIZE:
                 self.env.render()
 
+            # This makes it so the episode ends if a life is lost but doesnt reset the screen unless the lives == 0;
+            # this is what the original DQN paper does
+            reset_env = False
+            lives_before = self.env.unwrapped.ale.lives()
             next_state, reward, done, _ = self.env.step(action)
+            lives_after = self.env.unwrapped.ale.lives()
+            if lives_after == 0:
+                reset_env = True
+            if lives_before > lives_after:
+                done = True
+
             next_state = self.agent.state_processor.process_state(next_state, self.agent.sess, state, done)
+
+            total_ep_reward += reward  # Just for stats
             reward = np.clip(reward, -1.0, 1.0)
-            total_ep_reward += reward
 
             self.remember(state, action, reward, next_state, done)
 
@@ -304,20 +348,24 @@ class Runner:
                     self.current_max = np.maximum(self.current_max, total_ep_reward)
                     self.current_avg = self.current_avg + ((total_ep_reward - self.current_avg) / current_episode)
                     self.print_and_save_to_csv(current_episode, current_total_step, total_ep_reward, self.current_avg, self.current_max)
-                    self.agent.save_model(current_total_step)
+                    # self.agent.save_model(current_total_step)
 
                 # TEST
                 if current_episode % TEST_FREQ == 0 and self.run_type is RunType.TRAIN:
                     Runner(RunType.TEST, self.agent, None, 5, "breakout_test", current_train_step=current_total_step).run()
 
-                current_ep_step, state, noop = self.reset_episode()
+                if reset_env:
+                    current_ep_step, state, noop = self.reset_episode(None)
+                else:
+                    current_ep_step, state, noop = self.reset_episode(next_state[3])
+
                 total_ep_reward = 0
                 current_episode += 1
 
                 if self.run_type is not RunType.RAND_FILL:
                     print("Episode {}...".format(current_episode))
             else:
-                state = [next_state[0], next_state[1], next_state[2], next_state[3]]
+                state = next_state
                 current_ep_step += 1
 
             current_total_step += 1
@@ -332,9 +380,12 @@ class Runner:
         elif self.run_type is RunType.TEST:
             print("Testing agent...")
 
-    def reset_episode(self):
+    def reset_episode(self, next_state):
         noop = np.random.randint(0, NOOP_MAX)
-        reset_state = self.env.reset()
+        if next_state is None:
+            reset_state = self.env.reset()
+        else:
+            reset_state = next_state
         return 0, self.agent.state_processor.process_state(reset_state, self.agent.sess, None, False), noop
 
     def check_loop(self, current_total_step, current_ep):
@@ -395,4 +446,5 @@ def main():
     train = Runner(RunType.TRAIN, agent, NUM_TRAIN_STEPS, None, "breakout_train", current_train_step=None)
     train.run()
 
-main()
+if __name__ == "__main__":
+    main()
