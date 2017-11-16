@@ -23,7 +23,7 @@ WARMUP = 50000
 MEM_CAPACITY = 750000
 
 SCREEN_DIMS = (84, 84)
-SCREEN_STACK = 4  # Currently only works with 4
+SCREEN_STACK = 4  # Currently only works with 4 !!! (Don't change)
 NEW_STATE_SHAPE = SCREEN_DIMS + (SCREEN_STACK,)
 
 INIT_EPS = 1.0
@@ -117,9 +117,9 @@ class DQN:
     # COMPILING --------------------------------------------------------------------------------------------------------
     def create_model(self):
         model = Sequential()
-        model.add(Conv2D(32, 8, 8, subsample=(4, 4), activation='relu', input_shape=NEW_STATE_SHAPE))
-        model.add(Conv2D(64, 4, 4, subsample=(2, 2), activation='relu'))
-        model.add(Conv2D(64, 3, 3, subsample=(1, 1), activation='relu'))
+        model.add(Conv2D(32, (8, 8), strides=(4, 4), activation='relu', input_shape=NEW_STATE_SHAPE))
+        model.add(Conv2D(64, (4, 4), strides=(2, 2), activation='relu'))
+        model.add(Conv2D(64, (3, 3), strides=(1, 1), activation='relu'))
         model.add(Flatten())
         model.add(Dense(512, activation='relu'))
         model.add(Dense(ACTION_SIZE))
@@ -127,9 +127,9 @@ class DQN:
 
     def create_placeholders(self):
         state_shape = (None,) + NEW_STATE_SHAPE
-        self.states = tf.placeholder(tf.float32, shape=state_shape, name='states')  # state
+        self.states = tf.placeholder(tf.float32, shape=state_shape, name='states')
         self.actions = tf.placeholder(tf.uint8, shape=(None,), name='actions')
-        self.targets = tf.placeholder(tf.float32, shape=(None,), name='targets')  # q_vals
+        self.targets = tf.placeholder(tf.float32, shape=(None,), name='targets')
 
     def create_beh_graph(self):
         states = self.states / 255.0
