@@ -151,7 +151,7 @@ class DQN:
         else:  # Adam
             self.minimize = tf.train.AdamOptimizer(LEARNING_RATE).minimize(loss)
 
-
+    # Credit for python impl. of graves rmsprop: https://github.com/cgel
     def graves_rmsprop_optimizer(self, loss, learning_rate, rmsprop_decay, rmsprop_constant, gradient_clip):
         with tf.name_scope('rmsprop'):
             optimizer = None
